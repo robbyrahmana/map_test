@@ -1,6 +1,6 @@
+import 'package:android_intent/android_intent.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_praviaed/map_model.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'dart:async';
 
@@ -20,7 +20,7 @@ class MapsAed extends StatefulWidget {
 class MapsAedState extends State<MapsAed> {
   Completer<GoogleMapController> _controler = Completer();
   static const LatLng _center = const LatLng(46.263554, 15.183443);
-  final Set<Marker> _markers = {};
+  Set<Marker> _markers = {};
   LatLng _lastMapPosition = _center;
   MapType _currentMapType = MapType.normal;
 
@@ -33,6 +33,14 @@ class MapsAedState extends State<MapsAed> {
     tilt: 59,
     zoom: 11.0,
   );
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFirstMarker().then((value) {
+      _markers.addAll(value);
+    });
+  }
 
   Future<void> _goToPosition1() async {
     final GoogleMapController controller = await _controler.future;
@@ -62,8 +70,10 @@ class MapsAedState extends State<MapsAed> {
           markerId: MarkerId(id),
           position: _lastMapPosition,
           infoWindow: InfoWindow(
+            onTap: () {
+              _loadNavigation(_lastMapPosition);
+            },
             title: title,
-            snippet: '12',
           ),
           icon: BitmapDescriptor.defaultMarker,
         ),
@@ -90,7 +100,7 @@ class MapsAedState extends State<MapsAed> {
           title: Text(widget.title),
           backgroundColor: Colors.blue,
         ),
-        body: StreamBuilder<Object>(
+        body: StreamBuilder(
             stream: _collectionReference.snapshots(),
             builder: (context, snapshot) {
               return Stack(
@@ -116,9 +126,12 @@ class MapsAedState extends State<MapsAed> {
                             height: 16.0,
                           ),
                           button(() async {
+                            // generate new id for firebase document
                             String newid =
                                 _collectionReference.document().documentID;
+                            // open dialog for location name
                             await _setNewMarker(context, newid);
+                            // add new marker location on map
                             _onAddMarkerButtonPressed(
                                 newid, _controllerText.text);
                           }, Icons.add_location),
@@ -143,6 +156,7 @@ class MapsAedState extends State<MapsAed> {
         context: context,
         builder: (context) {
           return AlertDialog(
+            title: Text("Insert location name"),
             content: TextField(
               controller: _controllerText,
             ),
@@ -150,17 +164,56 @@ class MapsAedState extends State<MapsAed> {
               FlatButton(
                 child: Text("Save"),
                 onPressed: () {
+                  // save new map location to firebase
                   _collectionReference.document(newid).setData({
                     'id': newid,
                     'name': _controllerText.text,
                     'location': GeoPoint(
                         _lastMapPosition.latitude, _lastMapPosition.longitude),
                   });
+                  // close the dialog
                   Navigator.of(context).pop();
                 },
               )
             ],
           );
         });
+  }
+
+  // Method to load marker when first load
+  Future<Iterable<Marker>> _loadFirstMarker() async {
+    return await _collectionReference.getDocuments().then((stream) {
+      return stream.documents.map((snapshot) {
+        GeoPoint loc = snapshot['location'];
+        return Marker(
+          markerId: MarkerId(snapshot['id']),
+          position: LatLng(loc.latitude, loc.longitude),
+          infoWindow: InfoWindow(
+            onTap: () {
+              _loadNavigation(LatLng(loc.latitude, loc.longitude));
+            },
+            title: snapshot['name'],
+          ),
+          icon: BitmapDescriptor.defaultMarker,
+        );
+      }).toList();
+    });
+  }
+
+  // Method to open google map navigation
+  _loadNavigation(LatLng latLng) {
+    final AndroidIntent intent = new AndroidIntent(
+        action: 'action_view',
+        data: Uri.encodeFull("https://www.google.com/maps/dir/?api=1&origin=" +
+            _generateStringlatLang(_center) +
+            "&destination=" +
+            _generateStringlatLang(latLng) +
+            "&travelmode=driving&dir_action=navigate"),
+        package: 'com.google.android.apps.maps');
+    intent.launch();
+  }
+
+  String _generateStringlatLang(LatLng latLng) {
+    return latLng.latitude.toString() + "," + latLng.longitude.toString();
   }
 }
